@@ -19,5 +19,5 @@ npm run build   # Rollup + tsc，产物 dist/（main.js + manifest.json + styles
 
 - 同步上游：`git fetch upstream` 后按需 merge/rebase 到 main（remote `upstream` 已配置）
 - 修改走功能分支，经子代理审查循环验证后合入；提交信息用中文
-- 发布：bump `manifest.json` 版本号 → 更新 `CHANGELOG.md`（Keep a CHANGELOG 格式 + 底部 compare 链接）→ 合入 main → 打纯数字 tag（如 `0.3.0`）→ `gh release create`
+- 发布：bump `manifest.json` 版本号 → 更新 `CHANGELOG.md`（Keep a CHANGELOG 格式 + 底部 compare 链接）→ 合入 main → 打纯数字 tag（如 `0.3.0`）→ `gh release create` → **上传 `dist/main.js`、`manifest.json`、`styles.css` 三件套作为 release 附件**（`gh release upload <tag> dist/main.js manifest.json styles.css`，Obsidian 插件惯例，供手动安装与 BRAT 类工具引用）
 - 部署：构建后将 `dist/main.js`、`manifest.json`、`styles.css` 三件套覆盖到各 vault 的 `.obsidian/plugins/mermaid-popup/`
