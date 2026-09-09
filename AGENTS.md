@@ -6,6 +6,7 @@
 
 - `main`：跟随上游 main，只接收已验收的合并提交
 - `feat/download-diagram`：上游 PR #14（弹窗下载图表）+ 本地三轮审查修复，已随 0.3.0 合入 main
+- `fix/popup-after-external-modify`：修复图表被外部修改重渲染后 popup 失效（observer 按视图管理 + 按目标归属判定模式 + 回归 harness），已随 0.3.1 合入 main
 - 上游原仓库的只读参照副本位于 `D:\CODE\Project\_ForExplore\obsidian-diagram-popup`（评审 PR 时用，勿在其上开发）
 
 ## 构建与测试
