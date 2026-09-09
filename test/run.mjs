@@ -12,6 +12,8 @@
 //   S5 双分栏：v2(源码,活动) 自身重渲染 —— 第二个面板无 observer
 //   S6 中途打开过无图表笔记后，v1 重渲染 —— observer 被误释放/误绑定
 //   S7 跨模式弹窗冒烟：阅读目标弹窗在源码视图活动时仍正确定位图表
+//   S8 视图关闭：observer 回收（Map 收缩）
+//   S9 同 leaf 模式切换：旧 observer 回收、新容器按钮 class 正确
 
 import { JSDOM } from 'jsdom';
 import esbuild from 'esbuild';
@@ -188,18 +190,28 @@ async function scenario(id, desc, fn) {
     }
 }
 
+// 断言图表已按容器/高度上限自动缩放（svg 900×1200，容器宽 600，高度上限 600
+// → rate=0.5 → svg 450×600、容器高 600）——覆盖「不自动调整布局」症状
+function assertAdjusted(blk, msg) {
+    const svg = blk.querySelector('.mermaid svg');
+    assert(svg && svg.style.width === '450px' && svg.style.height === '600px',
+        `${msg}（svg 应缩放到 450×600，实际 ${svg && svg.style.width}×${svg && svg.style.height}）`);
+    assert(blk.style.height === '600px', `${msg}（容器高度应调整为 600px）`);
+}
+
 // S0 基线：打开 md 后按钮出现（源码/实时预览模式）。此场景必须绿，否则 harness 本身有问题。
-await scenario('S0', '基线：打开 md 后按钮出现（源码模式）', async () => {
+await scenario('S0', '基线：打开 md 后按钮出现并自动调整尺寸（源码模式）', async () => {
     const { app } = await makePlugin();
     const v = makeView('source');
     openLeaf(app, v);
     const blk = addDiagramBlock(v);
     app.workspace.trigger('layout-change');
     assert(buttonIn(blk, 'source'), '初始按钮未出现');
+    assertAdjusted(blk, '尺寸未自动调整');
 });
 
 // S1 外部修改（同视图重渲染，源码模式）：外部程序改文件 → 该视图图表重渲染
-await scenario('S1', '外部修改后重渲染，按钮恢复（源码模式，活动视图=本视图）', async () => {
+await scenario('S1', '外部修改后重渲染，按钮恢复且尺寸重调（源码模式，活动视图=本视图）', async () => {
     const { app } = await makePlugin();
     const v = makeView('source');
     openLeaf(app, v);
@@ -208,6 +220,7 @@ await scenario('S1', '外部修改后重渲染，按钮恢复（源码模式，�
     assert(buttonIn(blk, 'source'), '初始按钮未出现');
     const fresh = await rerenderDiagram(v, blk);
     assert(buttonIn(fresh, 'source'), '重渲染后按钮未恢复');
+    assertAdjusted(fresh, '重渲染后尺寸未重新调整');
 });
 
 // S2 外部修改（同视图重渲染，阅读模式）
@@ -293,6 +306,43 @@ await scenario('S7', '跨模式弹窗冒烟：阅读目标弹窗在源码视图�
     assert(coreDeep && coreDeep.tagName.toLowerCase() === 'svg',
         '克隆体内未能定位图表 svg（弹窗尺寸/下载导出将失败）');
     document.body.removeChild(overlay); // 清理共享 body
+});
+
+// S8 视图关闭：对应 observer 应被回收（Map 收缩），防泄漏回归
+await scenario('S8', '视图关闭：对应 observer 被回收', async () => {
+    const { app, plugin } = await makePlugin();
+    const v1 = makeView('source');
+    openLeaf(app, v1);
+    addDiagramBlock(v1);
+    app.workspace.trigger('layout-change');
+    assert(plugin.observers.size === 1, '应恰好挂一个 observer');
+    app.workspace.leaves.pop();      // 关闭 leaf
+    v1.containerEl.remove();         // 容器移出 DOM
+    app.workspace.trigger('layout-change');
+    assert(plugin.observers.size === 0, '视图关闭后 observer 未回收');
+});
+
+// S9 同 leaf 模式切换：旧容器 observer 回收、新容器按钮 class 按自身归属正确
+// （模式切换时 Obsidian 会替换视图容器；真实场景中源码/阅读两容器可能短暂并存）
+await scenario('S9', '同 leaf 模式切换：旧 observer 回收、新容器按钮 class 正确', async () => {
+    const { app, plugin } = await makePlugin();
+    const v1 = makeView('source');
+    openLeaf(app, v1);
+    const blk1 = addDiagramBlock(v1);
+    app.workspace.trigger('layout-change');
+    assert(buttonIn(blk1, 'source'), '源码模式初始按钮未出现');
+    assert(plugin.observers.has(v1.containerEl), 'v1 容器未挂 observer');
+
+    const vRead = makeView('preview');           // 切到阅读模式：换视图容器
+    app.workspace.leaves[0].view = vRead;
+    app.workspace.activeView = vRead;
+    v1.containerEl.remove();
+    document.body.appendChild(vRead.containerEl);
+    const blkR = addDiagramBlock(vRead);
+    app.workspace.trigger('layout-change');
+    assert(buttonIn(blkR, 'preview'), '切换后阅读模式按钮未出现');
+    assert(!plugin.observers.has(v1.containerEl), '旧容器 observer 未回收');
+    assert(plugin.observers.has(vRead.containerEl), '新容器未挂 observer');
 });
 
 // ---------------------------------------------------------------------------

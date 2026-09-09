@@ -98,10 +98,7 @@ export default class MermaidPopupPlugin extends Plugin {
     class_editBlockBtn = 'edit-block-button';
     class_openPopupBtn='mermaid-popup-button';
     class_openPopupBtnReading='mermaid-popup-button-reading';
-    class_openPopupBtn_container='mermaid-popup-button-container';
-    class_openPopupBtnReading_container='mermaid-popup-button-reading-container';
     class_md_containerRead = 'markdown-reading-view';
-    class_md_containerEdit = 'markdown-source-view';
     async onload() {
         console.log(`Loading ${this.manifest.name} ${this.manifest.version}`);
 
@@ -196,7 +193,7 @@ export default class MermaidPopupPlugin extends Plugin {
     }  
 
     /**
-     * 按目标元素自身的容器归属返回按钮 class 组合，与“活动视图”的模式无关，
+     * 按目标元素自身的容器归属返回按钮 class，与“活动视图”的模式无关，
      * 避免多个面板/多模式并存时另一侧的图表被误跳过：
      * - 挂在 .markdown-reading-view 下 → 阅读模式按钮
      * - 其余（.markdown-source-view 下等）→ 编辑模式按钮
@@ -208,13 +205,7 @@ export default class MermaidPopupPlugin extends Plugin {
         if (markAttr)
             isReading = markAttr === 'reading';
 
-        let popupButtonClass = this.class_openPopupBtn;
-        let popupButtonClass_container = this.class_openPopupBtn_container;
-        if (isReading){
-            popupButtonClass = this.class_openPopupBtnReading;
-            popupButtonClass_container = this.class_openPopupBtnReading_container;
-        }
-        return {popupButtonClass, popupButtonClass_container}
+        return isReading ? this.class_openPopupBtnReading : this.class_openPopupBtn;
     }
 
     // 监听视图容器内的 DOM 变化（图表重渲染等），为容器内的图表目标补挂按钮；
@@ -330,7 +321,7 @@ export default class MermaidPopupPlugin extends Plugin {
         let target = target_and_flagContainer[0];
 
         // 按目标自身的容器归属决定按钮形态，与“活动视图”的模式无关
-        let {popupButtonClass} = this.getMarkByElement(target);
+        let popupButtonClass = this.getMarkByElement(target);
 
         let popupButton;   
         let flagContainer = target_and_flagContainer[1] == 'true';
@@ -350,7 +341,7 @@ export default class MermaidPopupPlugin extends Plugin {
     create_open_button(target_and_flagContainer: [HTMLElement, string], isDebug:boolean=false){
 
         let target = target_and_flagContainer[0];
-        let {popupButtonClass} = this.getMarkByElement(target);
+        let popupButtonClass = this.getMarkByElement(target);
         let flagContainer = target_and_flagContainer[1] == 'true';
         let targetContainer = flagContainer? target:target.parentElement as HTMLElement;
 
@@ -401,13 +392,7 @@ export default class MermaidPopupPlugin extends Plugin {
     }
 
     isParentReading(ele:HTMLElement){
-        let parentClass = 'markdown-reading-view';
         return this.isParent(ele, this.class_md_containerRead)
-    }
-
-    isParentEditting(ele:HTMLElement){
-        
-        return this.isParent(ele, this.class_md_containerEdit)
     }
 
     isParent(ele:HTMLElement, parentClass:string){
@@ -521,7 +506,7 @@ export default class MermaidPopupPlugin extends Plugin {
      * @return {Element | null} - 返回 容器下的目标元素 ）
      */
     getCoreElement(container: HTMLElement){
-        let {popupButtonClass} = this.getMarkByElement(container)
+        let popupButtonClass = this.getMarkByElement(container)
         let diagramSvg = container.querySelector('.' + popupButtonClass);
         if(diagramSvg)
             return diagramSvg.nextElementSibling;
@@ -629,7 +614,7 @@ export default class MermaidPopupPlugin extends Plugin {
         // copy target
         // 先按原容器（仍在视图内）确定模式标记；克隆体脱离原容器后，
         // getMarkByElement 依赖 data-diagram-popup-mark 回溯原模式
-        let {popupButtonClass} = this.getMarkByElement(containerElement);
+        let popupButtonClass = this.getMarkByElement(containerElement);
         let containerElementClone = containerElement.cloneNode(true);
         let containerElementInPopup = containerElementClone as HTMLElement;
         containerElementInPopup.dataset.diagramPopupMark = this.isParentReading(containerElement) ? 'reading' : 'edit';
@@ -697,8 +682,8 @@ export default class MermaidPopupPlugin extends Plugin {
      */
     adjustInPopup(containerInPopupEle:HTMLElement)
     {
-        let mark = this.getMarkByElement(containerInPopupEle);
-        let btn_in_p = containerInPopupEle.querySelector('.'+mark.popupButtonClass) as HTMLElement;
+        let btnClass = this.getMarkByElement(containerInPopupEle);
+        let btn_in_p = containerInPopupEle.querySelector('.'+btnClass) as HTMLElement;
         if (btn_in_p == null)
             return;
         let coreEle_in_p = btn_in_p.nextElementSibling as HTMLElement;
