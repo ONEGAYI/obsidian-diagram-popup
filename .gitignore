@@ -2,6 +2,8 @@
 dist/**
 node_modules
 test-run/**
+test/.tmp/
+.zcode/
 bundle-analysis.html
 gifs - 副本
 gifs/bg-setting.png
