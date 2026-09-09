@@ -92,8 +92,8 @@ const DEFAULT_SETTINGS: MermaidPopupSetting = {
 
 export default class MermaidPopupPlugin extends Plugin {
     settings!: MermaidPopupSetting;
-    observer_editting!:MutationObserver | null;
-    observer_reading!:MutationObserver | null; 
+    // 每个打开的 markdown 视图容器各自的 observer（视图容器 → observer）
+    observers: Map<HTMLElement, MutationObserver> = new Map();
 
     class_editBlockBtn = 'edit-block-button';
     class_openPopupBtn='mermaid-popup-button';
@@ -131,45 +131,60 @@ export default class MermaidPopupPlugin extends Plugin {
         //     }
         // ));
       
-        // 监听模式切换事件
+        // 监听工作区布局变化：同步所有 markdown 视图（含 popout 窗口）的按钮与 observer
         this.registerEvent(this.app.workspace.on('layout-change', () => {
-            //console.log('layout-change');
-            let view = this.app.workspace.getActiveViewOfType(MarkdownView);
-            if (!view){ // 文档编辑全部关闭
-                this.RelaseWhenfileClose();
-            }
-            if (view) {
-                // 类型断言为 MarkdownView，以便访问 contentEl
-                let container = view.containerEl;
-                let targetArr = this.GetSettingsClassElementAll(container) as Array<[HTMLElement, string]>;
-                
-                //console.log('layout-change targetArr.length', targetArr.length);
-                if (targetArr == null || targetArr.length == 0)
-                {
-                    //console.log('layout-change break', targetArr.length);
-                    this.RelaseWhenfileClose();
-                }
-
-                for(var i=0;i<targetArr.length;i++)
-                {
-                    this.addPopupButton(targetArr[i]);
-                }
-
-                this.ObserveToAddPopupButton(container);
-             }
+            this.SyncAllViews();
         }));
     }
 
+    // 断开全部视图 observer（插件卸载，或工作区已无 markdown 视图时调用）
     RelaseWhenfileClose()
     {
-        this.observer_editting?.disconnect();
-        this.observer_editting = null;
-        this.observer_reading?.disconnect();
-        this.observer_reading = null;  
+        for (const observer of this.observers.values())
+            observer.disconnect();
+        this.observers.clear();
+    }
+
+    /**
+     * 同步所有 markdown 视图：
+     * 1. 为每个视图容器内的图表目标补挂 popup 按钮，并确保各自有 observer
+     * 2. 清理已关闭视图（容器不在工作区或已脱离 DOM）的 observer
+     */
+    SyncAllViews()
+    {
+        let leaves = this.app.workspace.getLeavesOfType('markdown');
+        let liveContainers = new Set<HTMLElement>();
+
+        for(var i=0;i<leaves.length;i++)
+        {
+            let container = leaves[i].view.containerEl as HTMLElement | null;
+            if (!container || !container.isConnected)
+                continue;
+            liveContainers.add(container);
+
+            let targetArr = this.GetSettingsClassElementAll(container) as Array<[HTMLElement, string]>;
+            if (targetArr)
+            {
+                for(var j=0;j<targetArr.length;j++)
+                    this.addPopupButton(targetArr[j]);
+            }
+
+            this.ObserveToAddPopupButton(container);
+        }
+
+        for (const [container, observer] of this.observers)
+        {
+            if (!liveContainers.has(container) || !container.isConnected)
+            {
+                observer.disconnect();
+                this.observers.delete(container);
+            }
+        }
     }
 
     onunload() {
         console.log(`Unloading ${this.manifest.name} ${this.manifest.version}`);
+        this.RelaseWhenfileClose();
     }
 
     async loadSettings() {
@@ -180,79 +195,52 @@ export default class MermaidPopupPlugin extends Plugin {
         await this.saveData(this.settings);
     }  
 
-    isPreviewMode(){
-        let view = this.app.workspace.getActiveViewOfType(MarkdownView);
-        return view && view.getMode() == "preview";
-    }
+    /**
+     * 按目标元素自身的容器归属返回按钮 class 组合，与“活动视图”的模式无关，
+     * 避免多个面板/多模式并存时另一侧的图表被误跳过：
+     * - 挂在 .markdown-reading-view 下 → 阅读模式按钮
+     * - 其余（.markdown-source-view 下等）→ 编辑模式按钮
+     * - popup 克隆体已脱离原容器，由 openPopup 打 data-diagram-popup-mark 携带原模式
+     */
+    getMarkByElement(ele:HTMLElement){
+        let isReading = this.isParentReading(ele);
+        let markAttr = ele.dataset?.diagramPopupMark;
+        if (markAttr)
+            isReading = markAttr === 'reading';
 
-    getOpenBtnInMd_Mark_ByParam(isPreviewMode:boolean){
         let popupButtonClass = this.class_openPopupBtn;
         let popupButtonClass_container = this.class_openPopupBtn_container;
-        if (isPreviewMode){
+        if (isReading){
             popupButtonClass = this.class_openPopupBtnReading;
             popupButtonClass_container = this.class_openPopupBtnReading_container;
         }
         return {popupButtonClass, popupButtonClass_container}
     }
 
-    // 获取 
-    getOpenBtnInMd_Mark(){
-        let popupButtonClass = this.class_openPopupBtn;
-        let popupButtonClass_container = this.class_openPopupBtn_container;
-        if (this.isPreviewMode()){
-            popupButtonClass = this.class_openPopupBtnReading;
-            popupButtonClass_container = this.class_openPopupBtnReading_container;
-        }
-        return {popupButtonClass, popupButtonClass_container}
-    }
-
-    getOpenBtnInMd_Mark_editMode(){
-        let popupButtonClass_edit = this.class_openPopupBtn;
-        let popupButtonClass_container_edit = this.class_openPopupBtn_container;
-        return {popupButtonClass_edit, popupButtonClass_container_edit}
-    }
-
-    getOpenBtnInMd_Mark_readMode(){
-        let popupButtonClass_read = this.class_openPopupBtnReading;
-        let  popupButtonClass_container_read = this.class_openPopupBtnReading_container;
-        return {popupButtonClass_read, popupButtonClass_container_read}
-    }    
-
-    // monitor new element add to edit view 
+    // 监听视图容器内的 DOM 变化（图表重渲染等），为容器内的图表目标补挂按钮；
+    // 每个视图容器各自一个 observer，互不影响
     ObserveToAddPopupButton(myView: HTMLElement){
-        if (this.observer_editting)
+        if (this.observers.has(myView))
             return;
-        this.observer_editting = new MutationObserver((mutationsList, observer) => {
 
-            let containerArr = this.GetSettingsClassElementAll(myView) as Array<[HTMLElement, string]>;                
+        let observer = new MutationObserver((mutationsList, observer) => {
+
+            let containerArr = this.GetSettingsClassElementAll(myView) as Array<[HTMLElement, string]>;
+            if (!containerArr)
+                return;
             for(var i=0;i<containerArr.length;i++){
                 let container = containerArr[i] as [HTMLElement, string];
                 let isTarget = this.IsClassListContains_SettingsDiagramClass(container[0]);
 
                 if(isTarget){
-                    this.addPopupButton(container, true); 
+                    this.addPopupButton(container, true);
                 }
             }
         });
 
-        this.observer_editting.observe(myView, { childList: true, subtree: true});
+        observer.observe(myView, { childList: true, subtree: true});
+        this.observers.set(myView, observer);
     }
-    // monitor new element add to read view 
-    ObserveToAddPopupButton_Reading(myView: HTMLElement){
-        if (this.observer_reading)
-            return;
-        this.observer_reading = new MutationObserver((mutationsList, observer) => {
-            let containerArr = this.GetSettingsClassElementAll(myView) as Array<[HTMLElement, string]>;;
-            for(var i=0;i<containerArr.length;i++){
-                let container = containerArr[i] as [HTMLElement, string];
-                if(this.IsClassListContains_SettingsDiagramClass(container[0])){
-                    this.addPopupButton(container); 
-                }
-            }
-        });
-
-        this.observer_reading.observe(myView, { childList: true, subtree: true});
-    } 
   
     /**
      * 获取数组 目标元素 和 是否容器标志
@@ -341,14 +329,8 @@ export default class MermaidPopupPlugin extends Plugin {
     addPopupButton(target_and_flagContainer: [HTMLElement, string], isDebug:boolean=false) {
         let target = target_and_flagContainer[0];
 
-        // 切换模式时，如判断原模式的目标，则退出当前方法        
-        if(this.isPreviewMode() && this.isParentEditting(target))
-            return;
-
-        if(!this.isPreviewMode() && this.isParentReading(target))
-            return;
-
-        let {popupButtonClass} = this.getOpenBtnInMd_Mark();
+        // 按目标自身的容器归属决定按钮形态，与“活动视图”的模式无关
+        let {popupButtonClass} = this.getMarkByElement(target);
 
         let popupButton;   
         let flagContainer = target_and_flagContainer[1] == 'true';
@@ -367,8 +349,8 @@ export default class MermaidPopupPlugin extends Plugin {
 
     create_open_button(target_and_flagContainer: [HTMLElement, string], isDebug:boolean=false){
 
-        let {popupButtonClass} = this.getOpenBtnInMd_Mark();
         let target = target_and_flagContainer[0];
+        let {popupButtonClass} = this.getMarkByElement(target);
         let flagContainer = target_and_flagContainer[1] == 'true';
         let targetContainer = flagContainer? target:target.parentElement as HTMLElement;
 
@@ -384,7 +366,7 @@ export default class MermaidPopupPlugin extends Plugin {
 
         this.adjustDiagramWidthAndHeight_ToContainer(targetContainer);
 
-        if(this.isPreviewMode())
+        if(this.isParentReading(target))
             targetContainer.setCssStyles({position:'relative'});
 
         if (flagContainer)
@@ -539,7 +521,7 @@ export default class MermaidPopupPlugin extends Plugin {
      * @return {Element | null} - 返回 容器下的目标元素 ）
      */
     getCoreElement(container: HTMLElement){
-        let {popupButtonClass} = this.getOpenBtnInMd_Mark()
+        let {popupButtonClass} = this.getMarkByElement(container)
         let diagramSvg = container.querySelector('.' + popupButtonClass);
         if(diagramSvg)
             return diagramSvg.nextElementSibling;
@@ -645,9 +627,12 @@ export default class MermaidPopupPlugin extends Plugin {
         this.setPopupBgAlpha(overlay);
         this.setPopupBgBlur(overlay);
         // copy target
+        // 先按原容器（仍在视图内）确定模式标记；克隆体脱离原容器后，
+        // getMarkByElement 依赖 data-diagram-popup-mark 回溯原模式
+        let {popupButtonClass} = this.getMarkByElement(containerElement);
         let containerElementClone = containerElement.cloneNode(true);
         let containerElementInPopup = containerElementClone as HTMLElement;
-        let {popupButtonClass} = this.getOpenBtnInMd_Mark();
+        containerElementInPopup.dataset.diagramPopupMark = this.isParentReading(containerElement) ? 'reading' : 'edit';
         let childElementArr = containerElementInPopup.querySelectorAll('.' + popupButtonClass); // 获取需要隐藏的子元素
         if (childElementArr){
             childElementArr.forEach(child => {
@@ -712,7 +697,7 @@ export default class MermaidPopupPlugin extends Plugin {
      */
     adjustInPopup(containerInPopupEle:HTMLElement)
     {
-        let mark = this.getOpenBtnInMd_Mark();
+        let mark = this.getMarkByElement(containerInPopupEle);
         let btn_in_p = containerInPopupEle.querySelector('.'+mark.popupButtonClass) as HTMLElement;
         if (btn_in_p == null)
             return;

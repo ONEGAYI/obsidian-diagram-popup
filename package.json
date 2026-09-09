@@ -6,6 +6,7 @@
     "scripts": {
         "dev": "npx rollup -c rollup.config.mjs -w --environment PRODUCTION:0",
         "build": "npx rollup -c rollup.config.mjs --environment PRODUCTION:1",
+        "test": "node test/run.mjs",
         "lint": "npx eslint src --ext .ts",
         "rollup": "npx rollup"
     },
@@ -16,6 +17,8 @@
         "@rollup/plugin-replace": "^6.0.1",
         "@rollup/plugin-terser": "^0.4.4",
         "@rollup/plugin-typescript": "^12.1.0",
+        "esbuild": "^0.28.2",
+        "jsdom": "^30.0.1",
         "obsidian": "latest",
         "rollup-plugin-copy": "^3.5.0",
         "rollup-plugin-visualizer": "^5.12.0",
