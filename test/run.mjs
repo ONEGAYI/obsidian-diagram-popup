@@ -322,9 +322,10 @@ await scenario('S8', '视图关闭：对应 observer 被回收', async () => {
     assert(plugin.observers.size === 0, '视图关闭后 observer 未回收');
 });
 
-// S9 同 leaf 模式切换：旧容器 observer 回收、新容器按钮 class 按自身归属正确
-// （模式切换时 Obsidian 会替换视图容器；真实场景中源码/阅读两容器可能短暂并存）
-await scenario('S9', '同 leaf 模式切换：旧 observer 回收、新容器按钮 class 正确', async () => {
+// S9 leaf 换视图（如关闭重开复用 leaf、popout 重组；真实 Obsidian 的同 leaf
+// 模式切换是同一 view 实例就地换 contentEl 子树，其按钮 class 判定已被 S2/S3
+// 覆盖同段代码）：旧容器 observer 回收、新容器按钮 class 按自身归属正确
+await scenario('S9', 'leaf 换视图：旧 observer 回收、新容器按钮 class 正确', async () => {
     const { app, plugin } = await makePlugin();
     const v1 = makeView('source');
     openLeaf(app, v1);
